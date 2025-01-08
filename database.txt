@@ -1,0 +1,45 @@
+import (
+	"database/sql"
+	"log"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+func setupDatabase() {
+	// データベース接続を作成
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// ユーザーテーブルの作成
+	createUserTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		password TEXT NOT NULL
+	);`
+
+	// スケジュールテーブルの作成
+	createScheduleTable := `
+	CREATE TABLE IF NOT EXISTS schedules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		date TEXT NOT NULL,
+		content TEXT,
+		user_id INTEGER,
+		FOREIGN KEY(user_id) REFERENCES users(id)
+	);`
+
+	_, err = db.Exec(createUserTable)
+	if err != nil {
+		log.Fatalf("Error creating users table: %v", err)
+	}
+
+	_, err = db.Exec(createScheduleTable)
+	if err != nil {
+		log.Fatalf("Error creating schedules table: %v", err)
+	}
+
+	log.Println("Database setup completed successfully.")
+}

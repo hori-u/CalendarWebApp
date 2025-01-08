@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar</title>
+    <style>
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; text-align: center; padding: 8px; }
+        th { background-color: #f4f4f4; }
+        .today { background-color: #ffeb3b; }
+        .empty { background-color: #f9f9f9; }
+        /* モーダル用のCSS */
+        #editModal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+        }
+        #editModal h3 {
+            margin-top: 0;
+        }
+        #editModal textarea {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>{{.Month}} {{.Year}}</h1>
+    <a href="{{.Prev}}">Previous</a> | <a href="{{.Next}}">Next</a>
+    <table>
+        <thead>
+            <tr>
+                <th>Sun</th>
+                <th>Mon</th>
+                <th>Tue</th>
+                <th>Wed</th>
+                <th>Thu</th>
+                <th>Fri</th>
+                <th>Sat</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Weeks}}
+            <tr>
+                {{range .Days}}
+                <td class="{{if .Empty}}empty{{else if .Today}}today{{end}}" data-date="{{$.Year}}-{{$.Month}}-{{.Date}}">
+                    {{if not .Empty}}{{.Date}}
+                    <div>
+                        {{if .Schedule}}
+                            <p>{{.Schedule}}</p>
+                            <button onclick="editSchedule('{{.Date}}', '{{.Schedule}}')">Edit</button>
+                            <button onclick="deleteSchedule('{{.Date}}')">Delete</button>
+                        {{else}}
+                            <button onclick="editSchedule('{{.Date}}', '')">Add</button>
+                        {{end}}
+                    </div>
+                    {{end}}
+                </td>
+                {{end}}
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    <!--<div id="modal" style="display:none; position:fixed; top:20%; left:30%; padding:20px; background:#fff; border:1px solid #ccc;">
+        <h3 id="selected-date"></h3>
+        <textarea id="schedule-content" rows="5" cols="30"></textarea><br>
+        <button onclick="saveSchedule()">Save</button>
+        <button onclick="closeModal()">Close</button>
+    </div>-->
+    <div id="editModal" style="display:none;">
+        <h3 id="modalDate"></h3>
+        <label for="modalContent">Schedule Content:</label> <!--ラベル追加-->
+        <textarea id="modalContent" rows="5" cols="30"></textarea><br>
+        <button id="saveModalButton">Save</button>
+        <button id="closeModalButton">Close</button>
+    </div>
+    <script>
+        /*const modal = document.getElementById('modal');
+        const selectedDate = document.getElementById('selected-date');
+        const contentInput = document.getElementById('schedule-content');
+
+        document.querySelectorAll('td[data-date]').forEach(td => {
+            td.addEventListener('click', async () => {
+                const date = td.getAttribute('data-date');
+                if (!date) return;
+
+                selectedDate.textContent = date;
+                modal.style.display = 'block';
+
+                const formattedDate = new Date(date).toISOString().split('T')[0]; // YYYY-MM-DD形式に変換
+                const response = await fetch(`/get?date=${formattedDate}`);
+                const data = await response.json();
+                contentInput.value = data.content || '';
+            });
+        });
+
+        function saveSchedule() {
+            const date = selectedDate.textContent;
+            const content = contentInput.value;
+
+            fetch('/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, content }),
+            }).then(() => {
+                alert('Schedule saved!');
+                closeModal();
+            });
+        }
+
+        /*function closeModal() {
+            modal.style.display = 'none';
+            selectedDate.textContent = '';
+            contentInput.value = '';
+        }
+
+        function editSchedule(date) {
+        // モーダルや入力フォームを取得
+        const modal = document.getElementById("editModal");
+        const dateInput = document.getElementById("scheduleDate");
+        const contentInput = document.getElementById("scheduleContent");
+
+        // モーダルを表示
+        modal.style.display = "block";
+
+        // 日付を設定
+        dateInput.value = date;
+
+        // サーバーからスケジュールを取得
+        fetch(`/get?date=${date}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                contentInput.value = data.content || ""; // スケジュールがなければ空白
+            })
+            .catch(error => {
+                console.error("Failed to fetch schedule:", error.message);
+            });
+
+        // 保存ボタンのクリックイベント
+        const saveButton = document.getElementById("saveScheduleButton");
+        saveButton.onclick = function () {
+            const content = contentInput.value;
+
+            // スケジュールを保存
+            fetch("/save", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    date: dateInput.value,
+                    content: content,
+                }),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    alert("スケジュールが保存されました！");
+                    modal.style.display = "none";
+                    location.reload(); // ページをリロードして変更を反映
+                })
+                .catch(error => {
+                    console.error("Failed to save schedule:", error.message);
+                });
+            };
+        }
+
+    // モーダルを閉じる処理
+    function closeModal() {
+        const modal = document.getElementById("editModal");
+        modal.style.display = "none";
+    }
+
+    // イベントリスナーの追加
+    document.getElementById("closeModalButton").onclick = closeModal;*/
+    // モーダル操作用スクリプト
+        const modal = document.getElementById("editModal");
+        const modalDate = document.getElementById("modalDate");
+        const modalContent = document.getElementById("modalContent");
+
+        // モーダルを開く関数
+        function editSchedule(date, content) {
+            modal.style.display = "block";
+            modalDate.textContent = `Editing: ${date}`;
+            modalDate.dataset.date = date; // 日付をデータ属性に保存
+            if (content != null) {
+                modalContent.value = content; // 既存の内容をセット
+            }
+        }
+
+        // モーダルを閉じる関数
+        function closeModal() {
+            modal.style.display = "none";
+            modalDate.textContent = "";
+            modalContent.value = "";
+        }
+
+        // スケジュールを保存する関数
+        function saveSchedule() {
+            const date = modalDate.dataset.date; // データ属性から日付を取得
+            if (!date) {
+                console.error("No date selected for schedule");
+                return; // 日付が選択されていない場合、処理を中断
+            }
+
+            const content = modalContent.value.trim(); // 入力された内容を取得
+
+            // 内容が空でない場合のみ送信
+            if (!content) {
+                console.error("No content entered for schedule");
+                return;
+            }
+
+            // サーバーに送信
+            fetch("/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date, content }),
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error("Failed to save schedule");
+                    alert("Schedule saved!");
+                    closeModal();
+                    location.reload(); // ページをリロードして更新を反映
+                })
+                .catch(error => console.error("Error:", error));
+            /*if (modalDate.dataset.date != null) {
+                const date = modalDate.dataset.date;
+            }    
+    
+            if (modalContent.value != null) {
+                const content = modalContent.value;
+            }else{
+                const content = "nan"
+            }
+
+            fetch("/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date, content }),
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error("Failed to save schedule");
+                    alert("Schedule saved!");
+                    closeModal();
+                    location.reload(); // ページをリロードして更新を反映
+                })
+                .catch(error => console.error("Error:", error));*/
+
+        }
+
+        // モーダルのボタンにイベントを追加
+        document.getElementById("saveModalButton").onclick = saveSchedule;
+        document.getElementById("closeModalButton").onclick = closeModal;
+
+        // 削除ボタンの動作例
+        function deleteSchedule(date) {
+            if (!confirm("Are you sure you want to delete this schedule?")) return;
+
+            fetch(`/delete?date=${date}`, { method: "DELETE" })
+                .then(response => {
+                    if (!response.ok) throw new Error("Failed to delete schedule");
+                    alert("Schedule deleted!");
+                    location.reload();
+                })
+                .catch(error => console.error("Error:", error));
+        }
+    </script>
+    <p><a href="/">Logout</a></p>
+</body>
+</html>
