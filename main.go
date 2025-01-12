@@ -124,7 +124,7 @@ func setupDatabase() *sql.DB {
 	createSchedulesTable := `
 	CREATE TABLE IF NOT EXISTS schedules (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		date TEXT NOT NULL,
+		date TEXT UNIQUE NOT NULL, -- UNIQUE 制約を追加
 		content TEXT NOT NULL
 	);
 	`
@@ -151,6 +151,7 @@ func main() {
 	r.HandleFunc("/save", saveScheduleHandler).Methods("POST")     // スケジュール保存
 	r.HandleFunc("/get", getScheduleHandler).Methods("GET")        // スケジュール取得
 	r.HandleFunc("/delete", deleteScheduleHandler).Methods("POST") //スケジュール削除
+	r.HandleFunc("/edit", editScheduleHandler)
 
 	// サーバーの起動
 	log.Println("Server is running on http://localhost:8080")
@@ -215,21 +216,23 @@ func calendarHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		defer rows.Close()
 		for rows.Next() {
+			//log.Printf("log:rows") //テストログ
 			var date, content string
 			if err := rows.Scan(&date, &content); err == nil {
 				scheduleMap[date] = content
+				//log.Printf("%v : %v", date, content) //テストログ
 			} else {
 				log.Printf("Error scanning row: %v", err) // ここでエラーが出てもスキップ
 			}
 		}
 	}
 
-	for rows.Next() {
+	/*for rows.Next() {
 		var date, content string
 		if err := rows.Scan(&date, &content); err == nil {
 			scheduleMap[date] = content
 		}
-	}
+	}*/
 
 	// Fill empty days at the start of the month
 	for i := 0; i < startWeekday; i++ {
@@ -245,6 +248,7 @@ func calendarHandler(w http.ResponseWriter, r *http.Request) {
 			Today:    now.Year() == year && now.Month() == month && now.Day() == day,
 			Schedule: scheduleMap[date], // スケジュールがなければ空文字
 		})
+		log.Printf("%v : %v", date, scheduleMap[date]) //テストログ
 		if len(days) == 7 {
 			weeks = append(weeks, Week{Days: days})
 			days = []Day{}
@@ -294,13 +298,13 @@ func saveScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	var schedule Schedule
 	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		log.Printf("Error decoding JSON: %v", err) // デコードエラーをログに表示
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	//mutex.Lock()
-	//scheduleMap[schedule.Date] = schedule.Content
-	//mutex.Unlock()
+	// デコード後の内容を確認
+	log.Printf("Received schedule: Date=%s, Content=%s", schedule.Date, schedule.Content)
 
 	db, err := sql.Open("sqlite3", "./calendar.db")
 	if err != nil {
@@ -309,13 +313,41 @@ func saveScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec("INSERT INTO schedules (date, content) VALUES (?, ?)", schedule.Date, schedule.Content)
-	if err != nil {
-		http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
+	// データベース内の該当日付を確認
+	var existing string
+	query := "SELECT content FROM schedules WHERE date = ?"
+	err = db.QueryRow(query, schedule.Date).Scan(&existing)
+
+	if err == sql.ErrNoRows {
+		// 存在しない場合、新規に追加
+		insertQuery := "INSERT INTO schedules (date, content) VALUES (?, ?)"
+		_, err = db.Exec(insertQuery, schedule.Date, schedule.Content)
+		if err != nil {
+			http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
+			return
+		}
+	} else if err == nil {
+		// 存在する場合、上書き
+		updateQuery := "UPDATE schedules SET content = ? WHERE date = ?"
+		_, err = db.Exec(updateQuery, schedule.Content, schedule.Date)
+		if err != nil {
+			http.Error(w, "Failed to update schedule", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// その他のエラー
+		http.Error(w, "Failed to query schedule", http.StatusInternalServerError)
 		return
 	}
 
+	/*_, err = db.Exec("INSERT INTO schedules (date, content) VALUES (?, ?)", schedule.Date, schedule.Content)
+	if err != nil {
+		http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
+		return
+	}*/
+
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Schedule saved successfully"))
 }
 
 func getScheduleHandler(w http.ResponseWriter, r *http.Request) {
@@ -372,7 +404,7 @@ func getScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func deleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
+func editScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	// 'X-Content-Type-Options' ヘッダーを追加
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
@@ -383,6 +415,59 @@ func deleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	var schedule Schedule
 	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if schedule.Date == "" || schedule.Content == "" {
+		http.Error(w, "Invalid schedule data", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		log.Printf("Failed to connect to database: %v", err)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec("UPDATE schedules SET content = ? WHERE date = ?", schedule.Content, schedule.Date)
+	if err != nil {
+		http.Error(w, "Failed to update schedule", http.StatusInternalServerError)
+		log.Printf("Failed to update schedule: %v", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func deleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	/*var schedule Schedule
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}*/
+	// クエリパラメータから日付を取得
+	/*date := r.URL.Query().Get("date")
+	if date == "" {
+		http.Error(w, "Date parameter is required", http.StatusBadRequest)
+		return
+	}*/
+	var schedule Schedule
+	//body, _ := ioutil.ReadAll(r.Body)
+	//log.Printf("Received request body: %s", string(body)) // リクエストボディをログ出力
+
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		log.Printf("Error decoding request body: %v", err) // エラーログを追加
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}

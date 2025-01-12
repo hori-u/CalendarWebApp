@@ -56,9 +56,9 @@
                         {{if .Schedule}}
                             <p>{{.Schedule}}</p>
                             <button onclick="editSchedule('{{.Date}}', '{{.Schedule}}')">Edit</button>
-                            <button onclick="deleteSchedule('{{.Date}}')">Delete</button>
+                            <button onclick="deleteSchedule('{{$.Year}}-{{$.Month}}-{{.Date}}')">Delete</button>
                         {{else}}
-                            <button onclick="editSchedule('{{.Date}}', '')">Add</button>
+                            <button onclick="addSchedule('{{.Date}}', '')">Add</button>
                         {{end}}
                     </div>
                     {{end}}
@@ -191,8 +191,38 @@
         const modalDate = document.getElementById("modalDate");
         const modalContent = document.getElementById("modalContent");
 
+        // 日付をクリックしたときの動作
+        document.querySelectorAll('td[data-date]').forEach(td => {
+            td.addEventListener('click', () => {
+                const date = td.getAttribute('data-date');
+                if (!date) return;
+
+                const formattedDate = decodeDate(date);
+
+                // サーバーからスケジュールを取得
+                fetch(`/get?date=${formattedDate}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // モーダルに内容を表示
+                        modal.style.display = "block";
+                        modalDate.textContent = `Date: ${date}`;
+                        modalDate.dataset.date = date; // 日付を保持
+                        modalContent.value = data.content || ""; // スケジュールがなければ空白
+                    })
+                    .catch(error => {
+                        console.error("Failed to fetch schedule:", error.message);
+                    });
+            });
+        });
+
+
         // モーダルを開く関数
-        function editSchedule(date, content) {
+        function addSchedule(date, content) {
             modal.style.display = "block";
             modalDate.textContent = `Editing: ${date}`;
             modalDate.dataset.date = date; // 日付をデータ属性に保存
@@ -208,6 +238,62 @@
             modalContent.value = "";
         }
 
+        function editSchedule(date, content) {
+            modal.style.display = "block";
+            modalDate.textContent = `Editing: ${date}`;
+            modalDate.dataset.date = date;
+            //modalContent.value = content;
+
+                // サーバーから該当日付のスケジュールを取得
+            const formattedDate = decodeDate(date); // 必要なら日付をフォーマット
+            fetch(`/get?date=${formattedDate}`)
+                .then(response => {
+                    if (!response.ok) throw new Error("Failed to fetch schedule");
+                    return response.json();
+                })
+                .then(data => {
+                // 取得したデータをモーダル内の`textarea`にセット
+                    modalContent.value = data.content || ""; // スケジュールがない場合は空白
+                })
+                .catch(error => {
+                    console.error("Error fetching schedule:", error);
+                });
+            
+
+            document.getElementById("saveModalButton").onclick = function () {
+                const updatedContent = modalContent.value.trim();
+                if (!updatedContent) {
+                    console.error("No content entered for schedule");
+                    return;
+                }
+
+                fetch("/edit", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ date: modalDate.dataset.date, content: updatedContent }),
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error("Failed to update schedule");
+                    alert("Schedule updated!");
+                    closeModal();
+                    location.reload(); // ページをリロードして更新を反映
+                })
+                .catch(error => console.error("Error:", error));
+            };
+        }
+
+        function decodeDate(date) {
+            // "2025-February-8" のような形式を "2025-02-08" の形式に変換
+            const dateParts = date.split('-'); // ["2025", "February", "8"]
+            const monthNames = {
+                "January": "01", "February": "02", "March": "03", "April": "04", "May": "05", "June": "06",
+                "July": "07", "August": "08", "September": "09", "October": "10", "November": "11", "December": "12"
+            };
+            const month = monthNames[dateParts[1]]; // 月名を数字に変換
+            const formattedDate = `${dateParts[0]}-${month}-${String(dateParts[2]).padStart(2, '0')}`; // "2025-02-08"
+            return formattedDate;
+        }
+
         // スケジュールを保存する関数
         function saveSchedule() {
             const date = modalDate.dataset.date; // データ属性から日付を取得
@@ -215,6 +301,19 @@
                 console.error("No date selected for schedule");
                 return; // 日付が選択されていない場合、処理を中断
             }
+            //console.log(date);
+
+            // "2025-February-8" のような形式を "2025-02-08" の形式に変換
+            /*const dateParts = date.split('-'); // ["2025", "February", "8"]
+            const monthNames = {
+                "January": "01", "February": "02", "March": "03", "April": "04", "May": "05", "June": "06",
+                "July": "07", "August": "08", "September": "09", "October": "10", "November": "11", "December": "12"
+            };
+            const month = monthNames[dateParts[1]]; // 月名を数字に変換
+            const formattedDate = `${dateParts[0]}-${month}-${String(dateParts[2]).padStart(2, '0')}`; // "2025-02-08"
+            console.log(formattedDate);*/
+
+            const formattedDate = decodeDate(date);
 
             const content = modalContent.value.trim(); // 入力された内容を取得
 
@@ -228,7 +327,7 @@
             fetch("/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ date, content }),
+                body: JSON.stringify({ date: formattedDate, content }),
             })
                 .then(response => {
                     if (!response.ok) throw new Error("Failed to save schedule");
@@ -270,7 +369,16 @@
         function deleteSchedule(date) {
             if (!confirm("Are you sure you want to delete this schedule?")) return;
 
-            fetch(`/delete?date=${date}`, { method: "DELETE" })
+            const formattedDate = decodeDate(date);
+
+            //console.log(formattedDate)
+
+            //fetch(`/delete?date=${formattedDate}`, { method: "DELETE" })  405errがでた原因不明->POSTに変更
+            fetch("/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date: formattedDate }),
+            })
                 .then(response => {
                     if (!response.ok) throw new Error("Failed to delete schedule");
                     alert("Schedule deleted!");
