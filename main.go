@@ -112,7 +112,8 @@ func setupDatabase() *sql.DB {
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
-		password_hash TEXT NOT NULL
+		password TEXT NOT NULL,
+		isadmin INTEGER NOT NULL DEFAULT 0
 	);
 	`
 	_, err = db.Exec(createUsersTable)
@@ -146,12 +147,15 @@ func main() {
 	// ルートの設定
 	r.HandleFunc("/", homeHandler).Methods("GET")
 	r.HandleFunc("/register", registerHandler).Methods("GET", "POST")
+	r.HandleFunc("/adminregister", AdminregisterHandler).Methods("GET", "POST")
 	r.HandleFunc("/login", loginHandler).Methods("GET", "POST")
+	r.HandleFunc("/adminlogin", AdminloginHandler).Methods("GET", "POST")
 	r.HandleFunc("/calendar", calendarHandler).Methods("GET")
 	r.HandleFunc("/save", saveScheduleHandler).Methods("POST")     // スケジュール保存
 	r.HandleFunc("/get", getScheduleHandler).Methods("GET")        // スケジュール取得
 	r.HandleFunc("/delete", deleteScheduleHandler).Methods("POST") //スケジュール削除
 	r.HandleFunc("/edit", editScheduleHandler)
+	r.HandleFunc("/admin", adminHandler)
 
 	// サーバーの起動
 	log.Println("Server is running on http://localhost:8080")
@@ -160,13 +164,13 @@ func main() {
 	}
 }
 
-func homeHandler(w http.ResponseWriter, r *http.Request) {
+/*func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// 'X-Content-Type-Options' ヘッダーを追加
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	tmpl := template.Must(template.ParseFiles("templates/home.html"))
 	tmpl.Execute(w, nil)
-}
+}*/
 
 func calendarHandler(w http.ResponseWriter, r *http.Request) {
 	// 'X-Content-Type-Options' ヘッダーを追加
@@ -536,13 +540,81 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer db.Close()
 
-		_, err = db.Exec("INSERT INTO users (username, password) VALUES (?, ?)", username, string(passwordHash))
+		// ユーザーを非管理者として登録 (isAdmin = 0)
+		_, err = db.Exec("INSERT INTO users (username, password, isAdmin) VALUES (?, ?, ?)", username, string(passwordHash), 0)
 		if err != nil {
+			http.Error(w, "Failed to create user", http.StatusInternalServerError)
+			return
+		}
+		/*_, err = db.Exec("INSERT INTO users (username, password) VALUES (?, ?)", username, string(passwordHash))
+		if err != nil {
+			http.Error(w, "User already exists", http.StatusConflict)
+			return
+		}*/
+
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	}
+}
+
+func AdminregisterHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	if r.Method == http.MethodGet {
+		tmpl := template.Must(template.ParseFiles("templates/adminregister.html"))
+		tmpl.Execute(w, nil)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		if username == "" || password == "" {
+			http.Error(w, "Username and password are required", http.StatusBadRequest)
+			return
+		}
+
+		lock.Lock()
+		defer lock.Unlock()
+
+		if _, exists := users[username]; exists {
 			http.Error(w, "User already exists", http.StatusConflict)
 			return
 		}
 
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		//passwordHash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		//users[username] = User{Username: username, PasswordHash: passwordHash}
+
+		// ハッシュ化されたパスワードを作成
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			return
+		}
+
+		// データベースに保存
+		db, err := sql.Open("sqlite3", "./calendar.db")
+		if err != nil {
+			http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
+			return
+		}
+		defer db.Close()
+
+		// ユーザーを非管理者として登録 (isAdmin = 0)
+		_, err = db.Exec("INSERT INTO users (username, password, isAdmin) VALUES (?, ?, ?)", username, string(passwordHash), 1)
+		if err != nil {
+			http.Error(w, "Failed to create user", http.StatusInternalServerError)
+			return
+		}
+		/*_, err = db.Exec("INSERT INTO users (username, password) VALUES (?, ?)", username, string(passwordHash))
+		if err != nil {
+			http.Error(w, "User already exists", http.StatusConflict)
+			return
+		}*/
+
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
 }
 
@@ -593,15 +665,17 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
-
 		// ログイン成功時のリダイレクト
 		http.Redirect(w, r, "/calendar", http.StatusSeeOther)
 	}
 }
 
-/*func loginHandler(w http.ResponseWriter, r *http.Request) {
+func AdminloginHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
 	if r.Method == http.MethodGet {
-		tmpl := template.Must(template.ParseFiles("templates/login.html"))
+		tmpl := template.Must(template.ParseFiles("templates/adminlogin.html"))
 		tmpl.Execute(w, nil)
 		return
 	}
@@ -611,15 +685,154 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		lock.Lock()
-		user, exists := users[username]
-		lock.Unlock()
+		if username == "" || password == "" {
+			http.Error(w, "Username and password are required", http.StatusBadRequest)
+			return
+		}
 
-		if !exists || bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) != nil {
+		// データベース接続を取得
+		db, err := sql.Open("sqlite3", "./calendar.db")
+		if err != nil {
+			http.Error(w, "Database connection error", http.StatusInternalServerError)
+			log.Printf("Failed to connect to database: %v", err)
+			return
+		}
+		defer db.Close()
+
+		// ユーザー情報を取得
+		var storedPassword string
+		var isAdmin int
+		err = db.QueryRow("SELECT password, isadmin FROM users WHERE username = ?", username).Scan(&storedPassword, &isAdmin)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			} else {
+				http.Error(w, "Database query error", http.StatusInternalServerError)
+				log.Printf("Failed to query user: %v", err)
+			}
+			return
+		}
+
+		// パスワードの検証
+		if bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(password)) != nil {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
 
-		http.Redirect(w, r, "/calendar", http.StatusSeeOther)
+		// 管理者であるか確認
+		if isAdmin == 1 {
+			// 管理者用のセッションまたはクッキーを設定
+			http.SetCookie(w, &http.Cookie{
+				Name:  "admin_auth",
+				Value: "true", // 管理者認証済みを示す値
+				Path:  "/",
+			})
+
+			// 管理者専用ページにリダイレクト
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			return
+		} else {
+			// 失敗時のリダイレクト
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+		}
 	}
-}*/
+}
+
+func adminHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// 管理者用クッキーの確認
+	cookie, err := r.Cookie("admin_auth")
+	if err != nil || cookie.Value != "true" {
+		http.Error(w, "Unauthorized: Admin access only", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		// 管理者用テンプレートをレンダリング
+		tmpl := template.Must(template.ParseFiles("templates/admin.html"))
+		tmpl.Execute(w, nil)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		newUsername := r.FormValue("new_username")
+		newPassword := r.FormValue("new_password")
+		isAdmin := r.FormValue("is_admin") == "1" // 管理者フラグ
+
+		// 入力チェック
+		if newUsername == "" || newPassword == "" {
+			http.Error(w, "Username and password are required", http.StatusBadRequest)
+			return
+		}
+
+		// データベース接続を取得
+		db, err := sql.Open("sqlite3", "./calendar.db")
+		if err != nil {
+			http.Error(w, "Database connection error", http.StatusInternalServerError)
+			log.Printf("Failed to connect to database: %v", err)
+			return
+		}
+		defer db.Close()
+
+		// パスワードをハッシュ化
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			return
+		}
+
+		// ユーザーを追加
+		_, err = db.Exec("INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)", newUsername, hashedPassword, isAdmin)
+		if err != nil {
+			http.Error(w, "Failed to add user", http.StatusInternalServerError)
+			log.Printf("Failed to insert user: %v", err)
+			return
+		}
+
+		// ユーザー追加成功
+		w.Write([]byte("User added successfully"))
+	}
+}
+
+func isUserExists() (bool, error) {
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// ユーザーが存在するか確認
+	userExists, err := isUserExists()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		log.Printf("Failed to check user existence: %v", err)
+		return
+	}
+
+	// テンプレートに渡すデータを作成
+	data := struct {
+		UserExists bool
+	}{
+		UserExists: userExists,
+	}
+
+	// テンプレートをレンダリング
+	tmpl := template.Must(template.ParseFiles("templates/home.html"))
+	tmpl.Execute(w, data)
+}

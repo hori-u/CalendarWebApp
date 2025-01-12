@@ -8,6 +8,14 @@
 <body>
     <h1>Welcome to the Calendar App</h1>
     <p>Please choose an option below:</p>
-    <a href="/register">Register</a> | <a href="/login">Login</a>
+    
+    {{if .UserExists}}
+        <!-- ユーザーがいる場合 -->
+        <a href="/adminlogin">Admin</a> | <a href="/login">Login</a>
+    {{else}}
+        <!-- ユーザーがいない場合 -->
+        <p>No users found. Please initialize an admin account.</p>
+        <a href="/adminregister">Initialize Admin</a>
+{{end}}
 </body>
 </html>
