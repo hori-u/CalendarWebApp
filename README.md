@@ -4,7 +4,7 @@
 
 # デモ
 
-https://github.com/hori-u/FPSGameProject/assets/143776523/ae7ecf9c-39c9-4a18-b807-78268d439e9e
+https://github.com/hori-u/CalendarWebApp/CalendarDemo1.mp4
 
 # 特徴
 
@@ -21,6 +21,15 @@ https://github.com/hori-u/FPSGameProject/assets/143776523/ae7ecf9c-39c9-4a18-b80
 ```
 git clone https://github.com/hori-u/FPSGameProject.git
 ```
+* 初期化
+ * Windows：
+   ```
+   delete_database.bat
+   ```
+ * Linux：
+   ```
+   ./delete_database.sh
+   ```
 
 # 使用方法
 
