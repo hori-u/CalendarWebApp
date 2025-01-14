@@ -61,45 +61,6 @@ var (
 	mutex       = &sync.Mutex{}           // For thread-safe access to the map
 )
 
-/*func calendarHandler(w http.ResponseWriter, r *http.Request) {
-	now := time.Now()
-	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	weekday := int(firstOfMonth.Weekday())
-
-	// Get the number of days in the month
-	daysInMonth := 32 - firstOfMonth.AddDate(0, 0, -32).Day()
-
-	// Build weeks and days
-	var weeks []Week
-	var days []Day
-	for i := 0; i < weekday; i++ {
-		days = append(days, Day{}) // Empty days before the start of the month
-	}
-	for day := 1; day <= daysInMonth; day++ {
-		isToday := now.Day() == day && now.Month() == firstOfMonth.Month() && now.Year() == firstOfMonth.Year()
-		days = append(days, Day{Date: day, Today: isToday})
-		if len(days) == 7 {
-			weeks = append(weeks, Week{Days: days})
-			days = []Day{}
-		}
-	}
-	if len(days) > 0 {
-		for len(days) < 7 {
-			days = append(days, Day{}) // Empty days after the end of the month
-		}
-		weeks = append(weeks, Week{Days: days})
-	}
-
-	data := CalendarData{
-		Year:  now.Year(),
-		Month: now.Month().String(),
-		Weeks: weeks,
-	}
-
-	tmpl := template.Must(template.ParseFiles("templates/calendar.html"))
-	tmpl.Execute(w, data)
-}*/
-
 func setupDatabase() *sql.DB {
 	// SQLite データベースに接続
 	db, err := sql.Open("sqlite3", "./calendar.db")
@@ -137,6 +98,22 @@ func setupDatabase() *sql.DB {
 	return db
 }
 
+func isUserExists() (bool, error) {
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 func main() {
 	// SQLiteデータベースのセットアップ
 	setupDatabase()
@@ -150,12 +127,12 @@ func main() {
 	r.HandleFunc("/adminregister", AdminregisterHandler).Methods("GET", "POST")
 	r.HandleFunc("/login", loginHandler).Methods("GET", "POST")
 	r.HandleFunc("/adminlogin", AdminloginHandler).Methods("GET", "POST")
+	r.HandleFunc("/admin", adminHandler)
 	r.HandleFunc("/calendar", calendarHandler).Methods("GET")
 	r.HandleFunc("/save", saveScheduleHandler).Methods("POST")     // スケジュール保存
 	r.HandleFunc("/get", getScheduleHandler).Methods("GET")        // スケジュール取得
 	r.HandleFunc("/delete", deleteScheduleHandler).Methods("POST") //スケジュール削除
-	r.HandleFunc("/edit", editScheduleHandler)
-	r.HandleFunc("/admin", adminHandler)
+	//r.HandleFunc("/edit", editScheduleHandler)
 
 	// サーバーの起動
 	log.Println("Server is running on http://localhost:8080")
@@ -164,334 +141,28 @@ func main() {
 	}
 }
 
-/*func homeHandler(w http.ResponseWriter, r *http.Request) {
+func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// 'X-Content-Type-Options' ヘッダーを追加
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
+	// ユーザーが存在するか確認
+	userExists, err := isUserExists()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		log.Printf("Failed to check user existence: %v", err)
+		return
+	}
+
+	// テンプレートに渡すデータを作成
+	data := struct {
+		UserExists bool
+	}{
+		UserExists: userExists,
+	}
+
+	// テンプレートをレンダリング
 	tmpl := template.Must(template.ParseFiles("templates/home.html"))
-	tmpl.Execute(w, nil)
-}*/
-
-func calendarHandler(w http.ResponseWriter, r *http.Request) {
-	// 'X-Content-Type-Options' ヘッダーを追加
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	year, month := time.Now().Year(), time.Now().Month()
-	queryYear := r.URL.Query().Get("year")
-	queryMonth := r.URL.Query().Get("month")
-
-	if queryYear != "" && queryMonth != "" {
-		parsedYear, errYear := strconv.Atoi(queryYear)
-		parsedMonth, errMonth := strconv.Atoi(queryMonth)
-		if errYear == nil && errMonth == nil && parsedMonth >= 1 && parsedMonth <= 12 {
-			year = parsedYear
-			month = time.Month(parsedMonth)
-		}
-	}
-
-	firstOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
-	nextMonthData := firstOfMonth.AddDate(0, 1, 0)
-	lastDayOfMonth := nextMonthData.AddDate(0, 0, -1)
-	daysInMonth := lastDayOfMonth.Day()
-
-	//daysInMonth := 32 - firstOfMonth.AddDate(0, 0, -32).Day()
-	//fmt.Println(firstOfMonth.AddDate(0, 0, -32).Day())
-	startWeekday := int(firstOfMonth.Weekday())
-
-	var weeks []Week
-	var days []Day
-
-	// データベース接続
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		http.Error(w, "Database connection error", http.StatusInternalServerError)
-		log.Printf("Failed to connect to database: %v", err)
-		return
-	}
-	defer db.Close()
-
-	// 各日付のスケジュールを取得
-	scheduleMap := make(map[string]string)
-	rows, err := db.Query("SELECT date, content FROM schedules WHERE date LIKE ?", fmt.Sprintf("%04d-%02d-%%", year, int(month)))
-	if err != nil {
-		//http.Error(w, "Failed to query schedules", http.StatusInternalServerError)
-		log.Printf("Failed to query schedules: %v", err)
-		//return
-	} else {
-		defer rows.Close()
-		for rows.Next() {
-			//log.Printf("log:rows") //テストログ
-			var date, content string
-			if err := rows.Scan(&date, &content); err == nil {
-				scheduleMap[date] = content
-				//log.Printf("%v : %v", date, content) //テストログ
-			} else {
-				log.Printf("Error scanning row: %v", err) // ここでエラーが出てもスキップ
-			}
-		}
-	}
-
-	/*for rows.Next() {
-		var date, content string
-		if err := rows.Scan(&date, &content); err == nil {
-			scheduleMap[date] = content
-		}
-	}*/
-
-	// Fill empty days at the start of the month
-	for i := 0; i < startWeekday; i++ {
-		days = append(days, Day{Empty: true})
-	}
-
-	// Fill the actual days of the month
-	now := time.Now()
-	for day := 1; day <= daysInMonth; day++ {
-		date := fmt.Sprintf("%04d-%02d-%02d", year, int(month), day) // 日付の文字列を生成 (例: "2025-01-07")
-		days = append(days, Day{
-			Date:     day,
-			Today:    now.Year() == year && now.Month() == month && now.Day() == day,
-			Schedule: scheduleMap[date], // スケジュールがなければ空文字
-		})
-		log.Printf("%v : %v", date, scheduleMap[date]) //テストログ
-		if len(days) == 7 {
-			weeks = append(weeks, Week{Days: days})
-			days = []Day{}
-		}
-	}
-
-	// Fill empty days at the end of the last week
-	for len(days) > 0 && len(days) < 7 {
-		days = append(days, Day{Empty: true})
-	}
-	if len(days) > 0 {
-		weeks = append(weeks, Week{Days: days})
-	}
-
-	// Calculate previous and next month
-	prevYear, prevMonth := year, month-1
-	if prevMonth < time.January {
-		prevYear--
-		prevMonth = time.December
-	}
-	nextYear, nextMonth := year, month+1
-	if nextMonth > time.December {
-		nextYear++
-		nextMonth = time.January
-	}
-
-	data := CalendarData{
-		Year:  year,
-		Month: month.String(),
-		Weeks: weeks,
-		Prev:  "/calendar?year=" + strconv.Itoa(prevYear) + "&month=" + strconv.Itoa(int(prevMonth)),
-		Next:  "/calendar?year=" + strconv.Itoa(nextYear) + "&month=" + strconv.Itoa(int(nextMonth)),
-	}
-
-	tmpl := template.Must(template.ParseFiles("templates/calendar.html"))
 	tmpl.Execute(w, data)
-}
-
-func saveScheduleHandler(w http.ResponseWriter, r *http.Request) {
-	// 'X-Content-Type-Options' ヘッダーを追加
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var schedule Schedule
-	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
-		log.Printf("Error decoding JSON: %v", err) // デコードエラーをログに表示
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// デコード後の内容を確認
-	log.Printf("Received schedule: Date=%s, Content=%s", schedule.Date, schedule.Content)
-
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	// データベース内の該当日付を確認
-	var existing string
-	query := "SELECT content FROM schedules WHERE date = ?"
-	err = db.QueryRow(query, schedule.Date).Scan(&existing)
-
-	if err == sql.ErrNoRows {
-		// 存在しない場合、新規に追加
-		insertQuery := "INSERT INTO schedules (date, content) VALUES (?, ?)"
-		_, err = db.Exec(insertQuery, schedule.Date, schedule.Content)
-		if err != nil {
-			http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
-			return
-		}
-	} else if err == nil {
-		// 存在する場合、上書き
-		updateQuery := "UPDATE schedules SET content = ? WHERE date = ?"
-		_, err = db.Exec(updateQuery, schedule.Content, schedule.Date)
-		if err != nil {
-			http.Error(w, "Failed to update schedule", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		// その他のエラー
-		http.Error(w, "Failed to query schedule", http.StatusInternalServerError)
-		return
-	}
-
-	/*_, err = db.Exec("INSERT INTO schedules (date, content) VALUES (?, ?)", schedule.Date, schedule.Content)
-	if err != nil {
-		http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
-		return
-	}*/
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Schedule saved successfully"))
-}
-
-func getScheduleHandler(w http.ResponseWriter, r *http.Request) {
-	// 'X-Content-Type-Options' ヘッダーを追加
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	date := r.URL.Query().Get("date")
-	/*dateStr := r.URL.Query().Get("date")
-	_, err := time.Parse("2006-January-2", dateStr)
-	if err != nil {
-		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		return
-	}
-	if dateStr == "" {
-		http.Error(w, "Date is required", http.StatusBadRequest)
-		return
-	}*/
-
-	if date == "" {
-		http.Error(w, "Date is required", http.StatusBadRequest)
-		return
-	}
-
-	//mutex.Lock()
-	//content, exists := scheduleMap[dateStr]
-	//mutex.Unlock()
-
-	//if !exists {
-	//	content = ""
-	//}
-
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	var content string
-	err = db.QueryRow("SELECT content FROM schedules WHERE date = ?", date).Scan(&content)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			content = ""
-		} else {
-			http.Error(w, "Failed to fetch schedule", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	response := Schedule{
-		Date:    date,
-		Content: content,
-	}
-	json.NewEncoder(w).Encode(response)
-}
-
-func editScheduleHandler(w http.ResponseWriter, r *http.Request) {
-	// 'X-Content-Type-Options' ヘッダーを追加
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var schedule Schedule
-	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if schedule.Date == "" || schedule.Content == "" {
-		http.Error(w, "Invalid schedule data", http.StatusBadRequest)
-		return
-	}
-
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		http.Error(w, "Database connection error", http.StatusInternalServerError)
-		log.Printf("Failed to connect to database: %v", err)
-		return
-	}
-	defer db.Close()
-
-	_, err = db.Exec("UPDATE schedules SET content = ? WHERE date = ?", schedule.Content, schedule.Date)
-	if err != nil {
-		http.Error(w, "Failed to update schedule", http.StatusInternalServerError)
-		log.Printf("Failed to update schedule: %v", err)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func deleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
-	// 'X-Content-Type-Options' ヘッダーを追加
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	/*var schedule Schedule
-	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}*/
-	// クエリパラメータから日付を取得
-	/*date := r.URL.Query().Get("date")
-	if date == "" {
-		http.Error(w, "Date parameter is required", http.StatusBadRequest)
-		return
-	}*/
-	var schedule Schedule
-	//body, _ := ioutil.ReadAll(r.Body)
-	//log.Printf("Received request body: %s", string(body)) // リクエストボディをログ出力
-
-	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
-		log.Printf("Error decoding request body: %v", err) // エラーログを追加
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		http.Error(w, "Database connection error", http.StatusInternalServerError)
-		log.Printf("Failed to connect to database: %v", err)
-		return
-	}
-	defer db.Close()
-
-	_, err = db.Exec("DELETE FROM schedules WHERE date = ?", schedule.Date)
-	if err != nil {
-		http.Error(w, "Failed to delete schedule", http.StatusInternalServerError)
-		log.Printf("Failed to delete schedule: %v", err)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -797,42 +468,291 @@ func adminHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func isUserExists() (bool, error) {
-	db, err := sql.Open("sqlite3", "./calendar.db")
-	if err != nil {
-		return false, err
-	}
-	defer db.Close()
-
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	if err != nil {
-		return false, err
-	}
-
-	return count > 0, nil
-}
-
-func homeHandler(w http.ResponseWriter, r *http.Request) {
+func calendarHandler(w http.ResponseWriter, r *http.Request) {
 	// 'X-Content-Type-Options' ヘッダーを追加
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	// ユーザーが存在するか確認
-	userExists, err := isUserExists()
+	year, month := time.Now().Year(), time.Now().Month()
+	queryYear := r.URL.Query().Get("year")
+	queryMonth := r.URL.Query().Get("month")
+
+	if queryYear != "" && queryMonth != "" {
+		parsedYear, errYear := strconv.Atoi(queryYear)
+		parsedMonth, errMonth := strconv.Atoi(queryMonth)
+		if errYear == nil && errMonth == nil && parsedMonth >= 1 && parsedMonth <= 12 {
+			year = parsedYear
+			month = time.Month(parsedMonth)
+		}
+	}
+
+	firstOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	nextMonthData := firstOfMonth.AddDate(0, 1, 0)
+	lastDayOfMonth := nextMonthData.AddDate(0, 0, -1)
+	daysInMonth := lastDayOfMonth.Day()
+
+	//daysInMonth := 32 - firstOfMonth.AddDate(0, 0, -32).Day()
+	//fmt.Println(firstOfMonth.AddDate(0, 0, -32).Day())
+	startWeekday := int(firstOfMonth.Weekday())
+
+	var weeks []Week
+	var days []Day
+
+	// データベース接続
+	db, err := sql.Open("sqlite3", "./calendar.db")
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		log.Printf("Failed to check user existence: %v", err)
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		log.Printf("Failed to connect to database: %v", err)
+		return
+	}
+	defer db.Close()
+
+	// 各日付のスケジュールを取得
+	scheduleMap := make(map[string]string)
+	rows, err := db.Query("SELECT date, content FROM schedules WHERE date LIKE ?", fmt.Sprintf("%04d-%02d-%%", year, int(month)))
+	if err != nil {
+		//http.Error(w, "Failed to query schedules", http.StatusInternalServerError)
+		log.Printf("Failed to query schedules: %v", err)
+		//return
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			//log.Printf("log:rows") //テストログ
+			var date, content string
+			if err := rows.Scan(&date, &content); err == nil {
+				scheduleMap[date] = content
+				//log.Printf("%v : %v", date, content) //テストログ
+			} else {
+				log.Printf("Error scanning row: %v", err) // ここでエラーが出てもスキップ
+			}
+		}
+	}
+
+	/*for rows.Next() {
+		var date, content string
+		if err := rows.Scan(&date, &content); err == nil {
+			scheduleMap[date] = content
+		}
+	}*/
+
+	// Fill empty days at the start of the month
+	for i := 0; i < startWeekday; i++ {
+		days = append(days, Day{Empty: true})
+	}
+
+	// Fill the actual days of the month
+	now := time.Now()
+	for day := 1; day <= daysInMonth; day++ {
+		date := fmt.Sprintf("%04d-%02d-%02d", year, int(month), day) // 日付の文字列を生成 (例: "2025-01-07")
+		days = append(days, Day{
+			Date:     day,
+			Today:    now.Year() == year && now.Month() == month && now.Day() == day,
+			Schedule: scheduleMap[date], // スケジュールがなければ空文字
+		})
+		log.Printf("%v : %v", date, scheduleMap[date]) //テストログ
+		if len(days) == 7 {
+			weeks = append(weeks, Week{Days: days})
+			days = []Day{}
+		}
+	}
+
+	// Fill empty days at the end of the last week
+	for len(days) > 0 && len(days) < 7 {
+		days = append(days, Day{Empty: true})
+	}
+	if len(days) > 0 {
+		weeks = append(weeks, Week{Days: days})
+	}
+
+	// Calculate previous and next month
+	prevYear, prevMonth := year, month-1
+	if prevMonth < time.January {
+		prevYear--
+		prevMonth = time.December
+	}
+	nextYear, nextMonth := year, month+1
+	if nextMonth > time.December {
+		nextYear++
+		nextMonth = time.January
+	}
+
+	data := CalendarData{
+		Year:  year,
+		Month: month.String(),
+		Weeks: weeks,
+		Prev:  "/calendar?year=" + strconv.Itoa(prevYear) + "&month=" + strconv.Itoa(int(prevMonth)),
+		Next:  "/calendar?year=" + strconv.Itoa(nextYear) + "&month=" + strconv.Itoa(int(nextMonth)),
+	}
+
+	tmpl := template.Must(template.ParseFiles("templates/calendar.html"))
+	tmpl.Execute(w, data)
+}
+
+func saveScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// テンプレートに渡すデータを作成
-	data := struct {
-		UserExists bool
-	}{
-		UserExists: userExists,
+	var schedule Schedule
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		log.Printf("Error decoding JSON: %v", err) // デコードエラーをログに表示
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
 	}
 
-	// テンプレートをレンダリング
-	tmpl := template.Must(template.ParseFiles("templates/home.html"))
-	tmpl.Execute(w, data)
+	// デコード後の内容を確認
+	log.Printf("Received schedule: Date=%s, Content=%s", schedule.Date, schedule.Content)
+
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	// データベース内の該当日付を確認
+	var existing string
+	query := "SELECT content FROM schedules WHERE date = ?"
+	err = db.QueryRow(query, schedule.Date).Scan(&existing)
+
+	if err == sql.ErrNoRows {
+		// 存在しない場合、新規に追加
+		insertQuery := "INSERT INTO schedules (date, content) VALUES (?, ?)"
+		_, err = db.Exec(insertQuery, schedule.Date, schedule.Content)
+		if err != nil {
+			http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
+			return
+		}
+	} else if err == nil {
+		// 存在する場合、上書き
+		updateQuery := "UPDATE schedules SET content = ? WHERE date = ?"
+		_, err = db.Exec(updateQuery, schedule.Content, schedule.Date)
+		if err != nil {
+			http.Error(w, "Failed to update schedule", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// その他のエラー
+		http.Error(w, "Failed to query schedule", http.StatusInternalServerError)
+		return
+	}
+
+	/*_, err = db.Exec("INSERT INTO schedules (date, content) VALUES (?, ?)", schedule.Date, schedule.Content)
+	if err != nil {
+		http.Error(w, "Failed to save schedule", http.StatusInternalServerError)
+		return
+	}*/
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Schedule saved successfully"))
+}
+
+func getScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	date := r.URL.Query().Get("date")
+	/*dateStr := r.URL.Query().Get("date")
+	_, err := time.Parse("2006-January-2", dateStr)
+	if err != nil {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		return
+	}
+	if dateStr == "" {
+		http.Error(w, "Date is required", http.StatusBadRequest)
+		return
+	}*/
+
+	if date == "" {
+		http.Error(w, "Date is required", http.StatusBadRequest)
+		return
+	}
+
+	//mutex.Lock()
+	//content, exists := scheduleMap[dateStr]
+	//mutex.Unlock()
+
+	//if !exists {
+	//	content = ""
+	//}
+
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var content string
+	err = db.QueryRow("SELECT content FROM schedules WHERE date = ?", date).Scan(&content)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			content = ""
+		} else {
+			http.Error(w, "Failed to fetch schedule", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	response := Schedule{
+		Date:    date,
+		Content: content,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func deleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	// 'X-Content-Type-Options' ヘッダーを追加
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// 'Content-Type' ヘッダーを追加
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	/*var schedule Schedule
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}*/
+	// クエリパラメータから日付を取得
+	/*date := r.URL.Query().Get("date")
+	if date == "" {
+		http.Error(w, "Date parameter is required", http.StatusBadRequest)
+		return
+	}*/
+	var schedule Schedule
+	//body, _ := ioutil.ReadAll(r.Body)
+	//log.Printf("Received request body: %s", string(body)) // リクエストボディをログ出力
+
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		log.Printf("Error decoding request body: %v", err) // エラーログを追加
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite3", "./calendar.db")
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		log.Printf("Failed to connect to database: %v", err)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec("DELETE FROM schedules WHERE date = ?", schedule.Date)
+	if err != nil {
+		http.Error(w, "Failed to delete schedule", http.StatusInternalServerError)
+		log.Printf("Failed to delete schedule: %v", err)
+		return
+	}
+
+	// 成功レスポンスをJSONで返す
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "Schedule deleted successfully"}`))
 }

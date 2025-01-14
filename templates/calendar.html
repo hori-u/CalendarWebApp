@@ -55,7 +55,6 @@
                     <div>
                         {{if .Schedule}}
                             <p>{{.Schedule}}</p>
-                            <button onclick="editSchedule('{{.Date}}', '{{.Schedule}}')">Edit</button>
                             <button onclick="deleteSchedule('{{$.Year}}-{{$.Month}}-{{.Date}}')">Delete</button>
                         {{else}}
                             <button onclick="addSchedule('{{.Date}}', '')">Add</button>
@@ -82,110 +81,6 @@
         <button id="closeModalButton">Close</button>
     </div>
     <script>
-        /*const modal = document.getElementById('modal');
-        const selectedDate = document.getElementById('selected-date');
-        const contentInput = document.getElementById('schedule-content');
-
-        document.querySelectorAll('td[data-date]').forEach(td => {
-            td.addEventListener('click', async () => {
-                const date = td.getAttribute('data-date');
-                if (!date) return;
-
-                selectedDate.textContent = date;
-                modal.style.display = 'block';
-
-                const formattedDate = new Date(date).toISOString().split('T')[0]; // YYYY-MM-DD形式に変換
-                const response = await fetch(`/get?date=${formattedDate}`);
-                const data = await response.json();
-                contentInput.value = data.content || '';
-            });
-        });
-
-        function saveSchedule() {
-            const date = selectedDate.textContent;
-            const content = contentInput.value;
-
-            fetch('/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date, content }),
-            }).then(() => {
-                alert('Schedule saved!');
-                closeModal();
-            });
-        }
-
-        /*function closeModal() {
-            modal.style.display = 'none';
-            selectedDate.textContent = '';
-            contentInput.value = '';
-        }
-
-        function editSchedule(date) {
-        // モーダルや入力フォームを取得
-        const modal = document.getElementById("editModal");
-        const dateInput = document.getElementById("scheduleDate");
-        const contentInput = document.getElementById("scheduleContent");
-
-        // モーダルを表示
-        modal.style.display = "block";
-
-        // 日付を設定
-        dateInput.value = date;
-
-        // サーバーからスケジュールを取得
-        fetch(`/get?date=${date}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                contentInput.value = data.content || ""; // スケジュールがなければ空白
-            })
-            .catch(error => {
-                console.error("Failed to fetch schedule:", error.message);
-            });
-
-        // 保存ボタンのクリックイベント
-        const saveButton = document.getElementById("saveScheduleButton");
-        saveButton.onclick = function () {
-            const content = contentInput.value;
-
-            // スケジュールを保存
-            fetch("/save", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    date: dateInput.value,
-                    content: content,
-                }),
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    alert("スケジュールが保存されました！");
-                    modal.style.display = "none";
-                    location.reload(); // ページをリロードして変更を反映
-                })
-                .catch(error => {
-                    console.error("Failed to save schedule:", error.message);
-                });
-            };
-        }
-
-    // モーダルを閉じる処理
-    function closeModal() {
-        const modal = document.getElementById("editModal");
-        modal.style.display = "none";
-    }
-
-    // イベントリスナーの追加
-    document.getElementById("closeModalButton").onclick = closeModal;*/
     // モーダル操作用スクリプト
         const modal = document.getElementById("editModal");
         const modalDate = document.getElementById("modalDate");
@@ -238,7 +133,7 @@
             modalContent.value = "";
         }
 
-        function editSchedule(date, content) {
+        /*function editSchedule(date, content) {
             modal.style.display = "block";
             modalDate.textContent = `Editing: ${date}`;
             modalDate.dataset.date = date;
@@ -280,7 +175,7 @@
                 })
                 .catch(error => console.error("Error:", error));
             };
-        }
+        }*/
 
         function decodeDate(date) {
             // "2025-February-8" のような形式を "2025-02-08" の形式に変換
@@ -301,17 +196,6 @@
                 console.error("No date selected for schedule");
                 return; // 日付が選択されていない場合、処理を中断
             }
-            //console.log(date);
-
-            // "2025-February-8" のような形式を "2025-02-08" の形式に変換
-            /*const dateParts = date.split('-'); // ["2025", "February", "8"]
-            const monthNames = {
-                "January": "01", "February": "02", "March": "03", "April": "04", "May": "05", "June": "06",
-                "July": "07", "August": "08", "September": "09", "October": "10", "November": "11", "December": "12"
-            };
-            const month = monthNames[dateParts[1]]; // 月名を数字に変換
-            const formattedDate = `${dateParts[0]}-${month}-${String(dateParts[2]).padStart(2, '0')}`; // "2025-02-08"
-            console.log(formattedDate);*/
 
             const formattedDate = decodeDate(date);
 
@@ -336,29 +220,6 @@
                     location.reload(); // ページをリロードして更新を反映
                 })
                 .catch(error => console.error("Error:", error));
-            /*if (modalDate.dataset.date != null) {
-                const date = modalDate.dataset.date;
-            }    
-    
-            if (modalContent.value != null) {
-                const content = modalContent.value;
-            }else{
-                const content = "nan"
-            }
-
-            fetch("/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ date, content }),
-            })
-                .then(response => {
-                    if (!response.ok) throw new Error("Failed to save schedule");
-                    alert("Schedule saved!");
-                    closeModal();
-                    location.reload(); // ページをリロードして更新を反映
-                })
-                .catch(error => console.error("Error:", error));*/
-
         }
 
         // モーダルのボタンにイベントを追加
